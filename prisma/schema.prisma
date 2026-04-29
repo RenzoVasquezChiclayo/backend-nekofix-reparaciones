@@ -1,0 +1,179 @@
+// Esquema multi-tenant: todas las entidades de negocio incluyen empresa_id (empresaId)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Rol {
+  ADMIN
+  TECNICO
+}
+
+enum EstadoOrden {
+  PENDIENTE
+  EN_PROCESO
+  TERMINADO
+}
+
+model Empresa {
+  id            String   @id @default(uuid())
+  nombre        String
+  razonSocial   String?  @map("razon_social")
+  activa        Boolean  @default(true)
+  creadoEn      DateTime @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  usuarios          Usuario[]
+  clientes          Cliente[]
+  ordenes           Orden[]
+  reparaciones      Reparacion[]
+  historialEstados  HistorialEstado[]
+  repuestos         Repuesto[]
+  reparacionesRepuesto ReparacionRepuesto[]
+
+  @@map("empresas")
+}
+
+model Usuario {
+  id            String   @id @default(uuid())
+  correo        String   @unique
+  contrasena    String   @map("contrasena_hash")
+  nombre        String
+  rol           Rol
+  activo        Boolean  @default(true)
+  empresaId     String   @map("empresa_id")
+  creadoEn      DateTime @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  ordenesCreadas Orden[] @relation("OrdenCreadaPor")
+  reparacionesTecnico Reparacion[] @relation("ReparacionTecnico")
+
+  @@index([empresaId])
+  @@map("usuarios")
+}
+
+model Cliente {
+  id            String   @id @default(uuid())
+  nombre        String
+  correo        String?
+  telefono      String?
+  notas         String?  @db.Text
+  empresaId     String   @map("empresa_id")
+  creadoEn      DateTime @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  ordenes Orden[]
+
+  @@index([empresaId])
+  @@map("clientes")
+}
+
+model Orden {
+  id                  String      @id @default(uuid())
+  codigo              String
+  estado              EstadoOrden @default(PENDIENTE)
+  descripcionProblema String      @map("descripcion_problema") @db.Text
+  dispositivo         String
+  marca               String?
+  modelo              String?
+  numeroSerie         String?     @map("numero_serie")
+  precio              Decimal?    @db.Decimal(10, 2)
+  estadoPago          String      @default("PENDIENTE") @map("estado_pago")
+  tokenConsulta       String?     @unique @map("token_consulta")
+  clienteId           String      @map("cliente_id")
+  empresaId           String      @map("empresa_id")
+  creadoPorId         String      @map("creado_por_id")
+  creadoEn            DateTime    @default(now()) @map("creado_en")
+  actualizadoEn       DateTime    @updatedAt @map("actualizado_en")
+
+  empresa          Empresa           @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  cliente          Cliente           @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  creadoPor        Usuario           @relation("OrdenCreadaPor", fields: [creadoPorId], references: [id], onDelete: Restrict)
+  reparaciones     Reparacion[]
+  historialEstados HistorialEstado[]
+
+  @@unique([empresaId, codigo])
+  @@index([empresaId])
+  @@index([clienteId])
+  @@index([creadoPorId])
+  @@index([tokenConsulta])
+  @@map("ordenes")
+}
+
+model Reparacion {
+  id                 String   @id @default(uuid())
+  descripcionTrabajo String   @map("descripcion_trabajo") @db.Text
+  ordenId            String   @map("orden_id")
+  empresaId          String   @map("empresa_id")
+  tecnicoId          String   @map("tecnico_id")
+  creadoEn           DateTime @default(now()) @map("creado_en")
+  actualizadoEn      DateTime @updatedAt @map("actualizado_en")
+
+  empresa             Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  orden               Orden                @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  tecnico             Usuario              @relation("ReparacionTecnico", fields: [tecnicoId], references: [id], onDelete: Restrict)
+  reparacionesRepuesto ReparacionRepuesto[]
+
+  @@index([empresaId])
+  @@index([ordenId])
+  @@index([tecnicoId])
+  @@map("reparaciones")
+}
+
+model HistorialEstado {
+  id       String     @id @default(uuid())
+  estado   EstadoOrden
+  ordenId  String     @map("orden_id")
+  empresaId String    @map("empresa_id")
+  creadoEn DateTime   @default(now()) @map("creado_en")
+
+  orden   Orden   @relation(fields: [ordenId], references: [id], onDelete: Cascade)
+  empresa Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@index([empresaId])
+  @@index([ordenId])
+  @@index([ordenId, creadoEn])
+  @@map("historial_estados")
+}
+
+model Repuesto {
+  id        String   @id @default(uuid())
+  nombre    String
+  stock     Int      @default(0)
+  empresaId String   @map("empresa_id")
+  creadoEn  DateTime @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  empresa               Empresa              @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  reparacionesRepuesto  ReparacionRepuesto[]
+
+  @@unique([empresaId, nombre])
+  @@index([empresaId])
+  @@map("repuestos")
+}
+
+model ReparacionRepuesto {
+  id          String   @id @default(uuid())
+  reparacionId String  @map("reparacion_id")
+  repuestoId   String  @map("repuesto_id")
+  cantidad     Int
+  empresaId    String  @map("empresa_id")
+  creadoEn     DateTime @default(now()) @map("creado_en")
+
+  reparacion Reparacion @relation(fields: [reparacionId], references: [id], onDelete: Cascade)
+  repuesto   Repuesto   @relation(fields: [repuestoId], references: [id], onDelete: Restrict)
+  empresa    Empresa    @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@unique([reparacionId, repuestoId])
+  @@index([empresaId])
+  @@index([reparacionId])
+  @@index([repuestoId])
+  @@map("reparaciones_repuestos")
+}

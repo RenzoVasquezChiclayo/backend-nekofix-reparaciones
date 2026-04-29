@@ -1,0 +1,9 @@
+import { Module } from '@nestjs/common';
+import { ReparacionesController } from './reparaciones.controller';
+import { ReparacionesService } from './reparaciones.service';
+
+@Module({
+  controllers: [ReparacionesController],
+  providers: [ReparacionesService],
+})
+export class ReparacionesModule {}
