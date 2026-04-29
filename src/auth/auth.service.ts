@@ -1,4 +1,5 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Rol } from '@prisma/client';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -24,7 +25,7 @@ export class AuthService {
     if (!coincide) {
       throw new UnauthorizedException('Credenciales incorrectas');
     }
-    if (!usuario.empresa.activa) {
+    if (usuario.rol !== Rol.SUPER_ADMIN && !usuario.empresa.activa) {
       throw new UnauthorizedException('La empresa está desactivada');
     }
     const carga: CargaUtilJwt = {

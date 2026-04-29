@@ -1,34 +1,36 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, Rol } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CrearClienteDto } from './dto/crear-cliente.dto';
 import { ActualizarClienteDto } from './dto/actualizar-cliente.dto';
+import type { UsuarioJwt } from '../common/interfaces/usuario-jwt.interface';
 
 @Injectable()
 export class ClientesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  crear(empresaId: string, dto: CrearClienteDto) {
+  crear(usuario: UsuarioJwt, dto: CrearClienteDto) {
     return this.prisma.cliente.create({
       data: {
         nombre: dto.nombre,
         correo: dto.correo,
         telefono: dto.telefono,
         notas: dto.notas,
-        empresaId,
+        empresaId: usuario.empresaId,
       },
     });
   }
 
-  listar(empresaId: string) {
+  listar(usuario: UsuarioJwt) {
     return this.prisma.cliente.findMany({
-      where: { empresaId },
+      where: this.condicionEmpresa(usuario),
       orderBy: { nombre: 'asc' },
     });
   }
 
-  async obtenerPorId(empresaId: string, id: string) {
+  async obtenerPorId(usuario: UsuarioJwt, id: string) {
     const cliente = await this.prisma.cliente.findFirst({
-      where: { id, empresaId },
+      where: { id, ...this.condicionEmpresa(usuario) },
     });
     if (!cliente) {
       throw new NotFoundException('Cliente no encontrado');
@@ -36,8 +38,8 @@ export class ClientesService {
     return cliente;
   }
 
-  async actualizar(empresaId: string, id: string, dto: ActualizarClienteDto) {
-    await this.obtenerPorId(empresaId, id);
+  async actualizar(usuario: UsuarioJwt, id: string, dto: ActualizarClienteDto) {
+    await this.obtenerPorId(usuario, id);
     return this.prisma.cliente.update({
       where: { id },
       data: {
@@ -49,9 +51,15 @@ export class ClientesService {
     });
   }
 
-  async eliminar(empresaId: string, id: string) {
-    await this.obtenerPorId(empresaId, id);
+  async eliminar(usuario: UsuarioJwt, id: string) {
+    await this.obtenerPorId(usuario, id);
     await this.prisma.cliente.delete({ where: { id } });
     return { eliminado: true, id };
+  }
+
+  private condicionEmpresa(usuario: UsuarioJwt): Prisma.ClienteWhereInput {
+    return usuario.rol === Rol.SUPER_ADMIN
+      ? {}
+      : { empresaId: usuario.empresaId };
   }
 }

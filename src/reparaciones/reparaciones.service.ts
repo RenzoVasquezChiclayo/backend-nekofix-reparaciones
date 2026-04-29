@@ -4,25 +4,46 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, Rol } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CrearReparacionDto } from './dto/crear-reparacion.dto';
 import { ActualizarReparacionDto } from './dto/actualizar-reparacion.dto';
+import type { UsuarioJwt } from '../common/interfaces/usuario-jwt.interface';
 
 @Injectable()
 export class ReparacionesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async crear(empresaId: string, dto: CrearReparacionDto) {
-    await this.validarOrdenPerteneceAEmpresa(dto.ordenId, empresaId);
-    await this.validarTecnicoPerteneceAEmpresa(dto.tecnicoId, empresaId);
+  async crear(usuario: UsuarioJwt, dto: CrearReparacionDto) {
+    const ordenBase =
+      usuario.rol === Rol.SUPER_ADMIN
+        ? await this.prisma.orden.findUnique({
+            where: { id: dto.ordenId },
+            select: { id: true, empresaId: true },
+          })
+        : await this.prisma.orden.findFirst({
+            where: { id: dto.ordenId, empresaId: usuario.empresaId },
+            select: { id: true, empresaId: true },
+          });
+    if (!ordenBase) {
+      throw new ForbiddenException(
+        'La orden no pertenece a su empresa o no existe',
+      );
+    }
+    const empresaId = ordenBase.empresaId;
+    const tecnicoId =
+      usuario.rol === Rol.TECNICO ? usuario.idUsuario : dto.tecnicoId;
+    if (!tecnicoId) {
+      throw new BadRequestException('Debe enviar tecnicoId para la reparación');
+    }
+    await this.validarTecnicoPerteneceAEmpresa(tecnicoId, empresaId);
     return this.prisma.$transaction(async (tx) => {
       const reparacion = await tx.reparacion.create({
         data: {
           descripcionTrabajo: dto.descripcionTrabajo,
           ordenId: dto.ordenId,
           empresaId,
-          tecnicoId: dto.tecnicoId,
+          tecnicoId,
         },
       });
 
@@ -50,9 +71,13 @@ export class ReparacionesService {
     });
   }
 
-  listar(empresaId: string) {
+  listar(usuario: UsuarioJwt) {
+    const where: Prisma.ReparacionWhereInput = this.condicionEmpresa(usuario);
+    if (usuario.rol === Rol.TECNICO) {
+      where.tecnicoId = usuario.idUsuario;
+    }
     return this.prisma.reparacion.findMany({
-      where: { empresaId },
+      where,
       orderBy: { creadoEn: 'desc' },
       include: {
         tecnico: { select: { id: true, nombre: true } },
@@ -64,10 +89,19 @@ export class ReparacionesService {
     });
   }
 
-  async listarPorOrden(empresaId: string, ordenId: string) {
-    await this.validarOrdenPerteneceAEmpresa(ordenId, empresaId);
+  async listarPorOrden(usuario: UsuarioJwt, ordenId: string) {
+    if (usuario.rol !== Rol.SUPER_ADMIN) {
+      await this.validarOrdenPerteneceAEmpresa(ordenId, usuario.empresaId);
+    }
+    const where: Prisma.ReparacionWhereInput = {
+      ordenId,
+      ...this.condicionEmpresa(usuario),
+    };
+    if (usuario.rol === Rol.TECNICO) {
+      where.tecnicoId = usuario.idUsuario;
+    }
     return this.prisma.reparacion.findMany({
-      where: { empresaId, ordenId },
+      where,
       orderBy: { creadoEn: 'desc' },
       include: {
         tecnico: { select: { id: true, nombre: true } },
@@ -78,9 +112,16 @@ export class ReparacionesService {
     });
   }
 
-  async obtenerPorId(empresaId: string, id: string) {
+  async obtenerPorId(usuario: UsuarioJwt, id: string) {
+    const where: Prisma.ReparacionWhereInput = {
+      id,
+      ...this.condicionEmpresa(usuario),
+    };
+    if (usuario.rol === Rol.TECNICO) {
+      where.tecnicoId = usuario.idUsuario;
+    }
     const reparacion = await this.prisma.reparacion.findFirst({
-      where: { id, empresaId },
+      where,
       include: {
         tecnico: { select: { id: true, nombre: true, correo: true } },
         orden: { include: { cliente: true } },
@@ -96,12 +137,13 @@ export class ReparacionesService {
   }
 
   async actualizar(
-    empresaId: string,
+    usuario: UsuarioJwt,
     id: string,
     dto: ActualizarReparacionDto,
   ) {
-    await this.obtenerPorId(empresaId, id);
-    if (dto.tecnicoId) {
+    const reparacion = await this.obtenerPorId(usuario, id);
+    const empresaId = reparacion.empresaId;
+    if (dto.tecnicoId && usuario.rol !== Rol.TECNICO) {
       await this.validarTecnicoPerteneceAEmpresa(dto.tecnicoId, empresaId);
     }
 
@@ -136,8 +178,13 @@ export class ReparacionesService {
     });
   }
 
-  async eliminar(empresaId: string, id: string) {
-    await this.obtenerPorId(empresaId, id);
+  async eliminar(usuario: UsuarioJwt, id: string) {
+    if (usuario.rol === Rol.TECNICO) {
+      throw new ForbiddenException(
+        'No tiene permisos para eliminar reparaciones',
+      );
+    }
+    await this.obtenerPorId(usuario, id);
     await this.prisma.reparacion.delete({ where: { id } });
     return { eliminado: true, id };
   }
@@ -210,5 +257,11 @@ export class ReparacionesService {
         },
       });
     }
+  }
+
+  private condicionEmpresa(usuario: UsuarioJwt): Prisma.ReparacionWhereInput {
+    return usuario.rol === Rol.SUPER_ADMIN
+      ? {}
+      : { empresaId: usuario.empresaId };
   }
 }

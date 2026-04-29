@@ -1,24 +1,28 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
-  ForbiddenException,
 } from '@nestjs/common';
-import { Prisma, EstadoOrden } from '@prisma/client';
+import { Prisma, EstadoOrden, Rol } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CrearOrdenDto } from './dto/crear-orden.dto';
 import { ActualizarOrdenDto } from './dto/actualizar-orden.dto';
+import type { UsuarioJwt } from '../common/interfaces/usuario-jwt.interface';
 
 @Injectable()
 export class OrdenesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async crear(empresaId: string, creadoPorId: string, dto: CrearOrdenDto) {
-    await this.validarClientePerteneceAEmpresa(dto.clienteId, empresaId);
+  async crear(usuario: UsuarioJwt, dto: CrearOrdenDto) {
+    await this.validarClientePerteneceAEmpresa(
+      dto.clienteId,
+      usuario.empresaId,
+    );
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const codigo = await this.generarCodigoOrden(tx, empresaId);
+        const codigo = await this.generarCodigoOrden(tx, usuario.empresaId);
         const tokenConsulta = this.generarTokenConsulta();
         const orden = await tx.orden.create({
           data: {
@@ -31,8 +35,8 @@ export class OrdenesService {
             precio: dto.precio,
             estadoPago: dto.estadoPago ?? 'PENDIENTE',
             clienteId: dto.clienteId,
-            empresaId,
-            creadoPorId,
+            empresaId: usuario.empresaId,
+            creadoPorId: usuario.idUsuario,
             tokenConsulta,
             estado: dto.estado ?? EstadoOrden.PENDIENTE,
           },
@@ -42,7 +46,7 @@ export class OrdenesService {
         await this.registrarHistorialEstado(tx, {
           estado: orden.estado,
           ordenId: orden.id,
-          empresaId,
+          empresaId: usuario.empresaId,
         });
 
         return orden;
@@ -60,9 +64,16 @@ export class OrdenesService {
     }
   }
 
-  async listar(empresaId: string) {
+  async listar(usuario: UsuarioJwt) {
+    const where: Prisma.OrdenWhereInput = this.condicionEmpresa(usuario);
+    if (usuario.rol === Rol.TECNICO) {
+      where.OR = [
+        { creadoPorId: usuario.idUsuario },
+        { reparaciones: { some: { tecnicoId: usuario.idUsuario } } },
+      ];
+    }
     return this.prisma.orden.findMany({
-      where: { empresaId },
+      where,
       orderBy: { creadoEn: 'desc' },
       include: {
         cliente: true,
@@ -71,9 +82,19 @@ export class OrdenesService {
     });
   }
 
-  async obtenerPorId(empresaId: string, id: string) {
+  async obtenerPorId(usuario: UsuarioJwt, id: string) {
+    const where: Prisma.OrdenWhereInput = {
+      id,
+      ...this.condicionEmpresa(usuario),
+    };
+    if (usuario.rol === Rol.TECNICO) {
+      where.OR = [
+        { creadoPorId: usuario.idUsuario },
+        { reparaciones: { some: { tecnicoId: usuario.idUsuario } } },
+      ];
+    }
     const orden = await this.prisma.orden.findFirst({
-      where: { id, empresaId },
+      where,
       include: {
         cliente: true,
         historialEstados: { orderBy: { creadoEn: 'desc' } },
@@ -130,10 +151,16 @@ export class OrdenesService {
     return orden;
   }
 
-  async actualizar(empresaId: string, id: string, dto: ActualizarOrdenDto) {
-    const ordenActual = await this.obtenerPorId(empresaId, id);
+  async actualizar(usuario: UsuarioJwt, id: string, dto: ActualizarOrdenDto) {
+    if (usuario.rol === Rol.TECNICO) {
+      throw new ForbiddenException('No tiene permisos para actualizar órdenes');
+    }
+    const ordenActual = await this.obtenerPorId(usuario, id);
     if (dto.clienteId) {
-      await this.validarClientePerteneceAEmpresa(dto.clienteId, empresaId);
+      await this.validarClientePerteneceAEmpresa(
+        dto.clienteId,
+        ordenActual.empresaId,
+      );
     }
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -166,7 +193,7 @@ export class OrdenesService {
           await this.registrarHistorialEstado(tx, {
             estado: dto.estado!,
             ordenId: orden.id,
-            empresaId,
+            empresaId: ordenActual.empresaId,
           });
         }
 
@@ -187,8 +214,8 @@ export class OrdenesService {
     }
   }
 
-  async cambiarEstado(empresaId: string, id: string, estado: EstadoOrden) {
-    const ordenActual = await this.obtenerPorId(empresaId, id);
+  async cambiarEstado(usuario: UsuarioJwt, id: string, estado: EstadoOrden) {
+    const ordenActual = await this.obtenerPorId(usuario, id);
     if (ordenActual.estado === estado) {
       return ordenActual;
     }
@@ -202,16 +229,19 @@ export class OrdenesService {
       await this.registrarHistorialEstado(tx, {
         estado,
         ordenId: id,
-        empresaId,
+        empresaId: ordenActual.empresaId,
       });
 
       return orden;
     });
   }
 
-  async eliminar(empresaId: string, id: string) {
+  async eliminar(usuario: UsuarioJwt, id: string) {
+    if (usuario.rol === Rol.TECNICO) {
+      throw new ForbiddenException('No tiene permisos para eliminar órdenes');
+    }
     const orden = await this.prisma.orden.findFirst({
-      where: { id, empresaId },
+      where: { id, ...this.condicionEmpresa(usuario) },
     });
     if (!orden) {
       throw new NotFoundException('Orden no encontrada');
@@ -253,5 +283,11 @@ export class OrdenesService {
 
   private generarTokenConsulta() {
     return randomBytes(16).toString('hex');
+  }
+
+  private condicionEmpresa(usuario: UsuarioJwt): Prisma.OrdenWhereInput {
+    return usuario.rol === Rol.SUPER_ADMIN
+      ? {}
+      : { empresaId: usuario.empresaId };
   }
 }

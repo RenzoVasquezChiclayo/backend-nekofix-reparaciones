@@ -19,6 +19,19 @@ async function principal() {
   });
 
   await prisma.usuario.upsert({
+    where: { correo: 'superadmin@nekofix.demo' },
+    update: { contrasena },
+    create: {
+      correo: 'superadmin@nekofix.demo',
+      contrasena,
+      nombre: 'Super Admin',
+      rol: Rol.SUPER_ADMIN,
+      empresaId: empresa.id,
+      activo: true,
+    },
+  });
+
+  await prisma.usuario.upsert({
     where: { correo: 'admin@nekofix.demo' },
     update: { contrasena },
     create: {
@@ -81,7 +94,7 @@ async function principal() {
   });
 
   process.stdout.write(
-    'Seed completado. Usuarios: admin@nekofix.demo / tecnico@nekofix.demo — contraseña: Admin123!\n',
+    'Seed completado. Usuarios: superadmin@nekofix.demo / admin@nekofix.demo / tecnico@nekofix.demo — contraseña: Admin123!\n',
   );
 }
 

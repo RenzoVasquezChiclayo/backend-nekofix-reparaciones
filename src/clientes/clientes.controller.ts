@@ -8,47 +8,55 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { EmpresaActual } from '../common/decorators/empresa-actual.decorator';
+import { Rol } from '@prisma/client';
+import { UsuarioActual } from '../common/decorators/usuario-actual.decorator';
+import type { UsuarioJwt } from '../common/interfaces/usuario-jwt.interface';
+import { Roles } from '../common/decorators/roles.decorator';
+import { UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { ClientesService } from './clientes.service';
 import { CrearClienteDto } from './dto/crear-cliente.dto';
 import { ActualizarClienteDto } from './dto/actualizar-cliente.dto';
 
 @Controller('clientes')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Rol.SUPER_ADMIN, Rol.ADMIN, Rol.TECNICO)
 export class ClientesController {
   constructor(private readonly clientesService: ClientesService) {}
 
   @Post()
-  crear(@EmpresaActual() empresaId: string, @Body() dto: CrearClienteDto) {
-    return this.clientesService.crear(empresaId, dto);
+  crear(@UsuarioActual() usuario: UsuarioJwt, @Body() dto: CrearClienteDto) {
+    return this.clientesService.crear(usuario, dto);
   }
 
   @Get()
-  listar(@EmpresaActual() empresaId: string) {
-    return this.clientesService.listar(empresaId);
+  listar(@UsuarioActual() usuario: UsuarioJwt) {
+    return this.clientesService.listar(usuario);
   }
 
   @Get(':id')
   obtener(
-    @EmpresaActual() empresaId: string,
+    @UsuarioActual() usuario: UsuarioJwt,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.clientesService.obtenerPorId(empresaId, id);
+    return this.clientesService.obtenerPorId(usuario, id);
   }
 
   @Patch(':id')
   actualizar(
-    @EmpresaActual() empresaId: string,
+    @UsuarioActual() usuario: UsuarioJwt,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: ActualizarClienteDto,
   ) {
-    return this.clientesService.actualizar(empresaId, id, dto);
+    return this.clientesService.actualizar(usuario, id, dto);
   }
 
   @Delete(':id')
   eliminar(
-    @EmpresaActual() empresaId: string,
+    @UsuarioActual() usuario: UsuarioJwt,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.clientesService.eliminar(empresaId, id);
+    return this.clientesService.eliminar(usuario, id);
   }
 }

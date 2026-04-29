@@ -29,6 +29,7 @@ export class CrearReparacionDto {
   @IsUUID('4')
   ordenId: string;
 
+  @IsOptional()
   @IsUUID('4', { message: 'El tecnicoId debe ser un UUID válido' })
   tecnicoId: string;
 

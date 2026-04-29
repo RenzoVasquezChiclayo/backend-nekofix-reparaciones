@@ -28,6 +28,9 @@ export class RolesGuard implements CanActivate {
     if (!usuario) {
       throw new ForbiddenException('Usuario no autenticado');
     }
+    if (usuario.rol === Rol.SUPER_ADMIN) {
+      return true;
+    }
     const permitido = rolesRequeridos.includes(usuario.rol);
     if (!permitido) {
       throw new ForbiddenException('No tiene permisos para esta operación');
