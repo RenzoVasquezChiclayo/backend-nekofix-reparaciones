@@ -18,7 +18,11 @@ export class UsuariosService {
     const where: Prisma.UsuarioWhereInput =
       usuario.rol === Rol.SUPER_ADMIN
         ? {}
-        : { empresaId: usuario.empresaId, activo: true };
+        : {
+            empresaId: usuario.empresaId,
+            activo: true,
+            rol: { not: Rol.SUPER_ADMIN },
+          };
 
     return this.prisma.usuario.findMany({
       where,
